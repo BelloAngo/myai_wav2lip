@@ -23,4 +23,4 @@ RUN pip install -r requirements.txt
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 # Command to run the application
-CMD ["python", "runpod_wav2lip.py"]
+CMD ["python", "server.py"]
