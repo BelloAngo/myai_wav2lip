@@ -8,7 +8,7 @@ import cv2
 import librosa
 import numpy as np
 import torch
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from base64_video import convert
@@ -177,13 +177,24 @@ def process_frames(
         yield json.dumps({"video": base64_list})
 
 
-@app.post("/video")
-async def generate_video_endpoint(face: str, audio: str):
+@app.get("/video")
+async def generate_video_endpoint(face: UploadFile, audio: UploadFile):
     """HTTP endpoint to generate and return the entire video."""
+    if not face.content_type.startswith("image"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid 'face' type {face.content_type}, only images are allowed",
+        )
+    if not audio.content_type.startswith("audio"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid 'audio' type {audio.content_type}, only audio files are allowed",
+        )
+
     try:
         # Decode and validate input data
-        face_image = decode_face_data(face)
-        audio_data = decode_audio_data(audio)
+        face_image = decode_face_data("".join(await face.read()))
+        audio_data = decode_audio_data("".join(await audio.read()))
 
         # Generate the video
         base64_video = generate_video(face_image, audio_data)
