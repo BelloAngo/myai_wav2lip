@@ -177,7 +177,7 @@ def process_frames(
         yield json.dumps({"video": base64_list})
 
 
-@app.post("/generate-video")
+@app.post("/video")
 async def generate_video_endpoint(face: str, audio: str):
     """HTTP endpoint to generate and return the entire video."""
     try:
