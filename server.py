@@ -177,7 +177,7 @@ def process_frames(
         yield json.dumps({"video": base64_list})
 
 
-@app.get("/video")
+@app.post("/video")
 async def generate_video_endpoint(face: UploadFile, audio: UploadFile):
     """HTTP endpoint to generate and return the entire video."""
     if not face.content_type.startswith("image"):
@@ -192,9 +192,15 @@ async def generate_video_endpoint(face: UploadFile, audio: UploadFile):
         )
 
     try:
+        # Read and encode face file as base64
+        face_base64 = base64.b64encode(await face.read()).decode("utf-8")
+
+        # Read and encode audio file as base64
+        audio_base64 = base64.b64encode(await audio.read()).decode("utf-8")
+
         # Decode and validate input data
-        face_image = decode_face_data("".join(await face.read()))
-        audio_data = decode_audio_data("".join(await audio.read()))
+        face_image = decode_face_data(face_base64)
+        audio_data = decode_audio_data(audio_base64)
 
         # Generate the video
         base64_video = generate_video(face_image, audio_data)
@@ -206,6 +212,7 @@ async def generate_video_endpoint(face: UploadFile, audio: UploadFile):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Processing error: {e}")
+        raise e
         raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
