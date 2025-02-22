@@ -153,10 +153,9 @@ def datagen(frames, mels, filename):
 
 def _load(checkpoint_path):
     if device == 'cuda':
-        checkpoint = torch.load(checkpoint_path, weights_only=False)
+        checkpoint = torch.load(checkpoint_path)
     else:
         checkpoint = torch.load(checkpoint_path,
-                                weights_only=False,
                                 map_location=lambda storage, loc: storage)
     return checkpoint
 
