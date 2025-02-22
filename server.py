@@ -160,6 +160,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"error": str(e)})
             except Exception as e:
                 logger.error(f"Processing error: {e}")
+                raise e
                 await websocket.send_json({"error": "An internal error occurred"})
 
     except WebSocketDisconnect:
