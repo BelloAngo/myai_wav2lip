@@ -2,14 +2,14 @@ import base64
 import io
 import json
 import logging
-from typing import Generator
+from typing import Generator, List
 
 import cv2
 import librosa
 import numpy as np
 import torch
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from base64_video import convert
 from runpod_wav2lip_util import *
@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Constants (move these to a config file or environment variables in production)
+# Constants
 SAMPLE_RATE = 16000
 FPS = 25
 MEL_STEP_SIZE = 16
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Load model (move this to a separate function or module)
+# Load model
 print("Loading Model")
 model = load_model(checkpoint_path)
 model.to(DEVICE)
@@ -34,11 +34,19 @@ print("Model loaded")
 
 
 def decode_face_data(face_data: str) -> np.ndarray:
-    """Decode base64 face data into a numpy array."""
+    """Decode base64 face data into a numpy array and validate it."""
     try:
         face_bytes = base64.b64decode(face_data)
         face_np = np.frombuffer(face_bytes, np.uint8)
         face = cv2.imdecode(face_np, cv2.IMREAD_COLOR)
+
+        if face is None:
+            raise ValueError("Decoded face data is not a valid image")
+        if face.size == 0:
+            raise ValueError("Decoded face data is empty")
+        if face.shape[0] == 0 or face.shape[1] == 0:
+            raise ValueError("Decoded face data has invalid dimensions")
+
         return face
     except Exception as e:
         logger.error(f"Error decoding face data: {e}")
@@ -46,18 +54,24 @@ def decode_face_data(face_data: str) -> np.ndarray:
 
 
 def decode_audio_data(audio_base64: str) -> np.ndarray:
-    """Decode base64 audio data into a numpy array."""
+    """Decode base64 audio data into a numpy array and validate it."""
     try:
         audio_bytes = base64.b64decode(audio_base64)
         audio_stream = io.BytesIO(audio_bytes)
-        wav, _ = librosa.load(audio_stream, sr=SAMPLE_RATE)
+        wav, sr = librosa.load(audio_stream, sr=SAMPLE_RATE)
+
+        if wav.size == 0:
+            raise ValueError("Decoded audio data is empty")
+        if sr != SAMPLE_RATE:
+            raise ValueError(f"Audio sample rate must be {SAMPLE_RATE} Hz")
+
         return wav
     except Exception as e:
         logger.error(f"Error decoding audio data: {e}")
         raise ValueError("Invalid audio data")
 
 
-def generate_mel_chunks(wav: np.ndarray) -> list:
+def generate_mel_chunks(wav: np.ndarray) -> List[np.ndarray]:
     """Generate mel-spectrogram chunks from audio data."""
     mel = audio.melspectrogram(wav)
     if np.isnan(mel.reshape(-1)).sum() > 0:
@@ -79,6 +93,37 @@ def generate_mel_chunks(wav: np.ndarray) -> list:
 
     logger.info(f"Generated {len(mel_chunks)} mel chunks")
     return mel_chunks
+
+
+def generate_video(face: np.ndarray, wav: np.ndarray) -> str:
+    """Generate the entire video and return it as a base64-encoded string."""
+    mel_chunks = generate_mel_chunks(wav)
+    full_frames = [face]
+    frame_list = []
+
+    gen = datagen(full_frames.copy(), mel_chunks, face)
+    for i, (img_batch, mel_batch, frames, coords) in enumerate(gen):
+        img_batch = torch.FloatTensor(np.transpose(img_batch, (0, 3, 1, 2))).to(DEVICE)
+        mel_batch = torch.FloatTensor(np.transpose(mel_batch, (0, 3, 1, 2))).to(DEVICE)
+
+        with torch.no_grad():
+            pred = model(mel_batch, img_batch)
+
+        pred = pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.0
+
+        for p, f, c in zip(pred, frames, coords):
+            y1, y2, x1, x2 = c
+            p = cv2.resize(p.astype(np.uint8), (x2 - x1, y2 - y1))
+            f[y1:y2, x1:x2] = p
+            f = cv2.resize(f, (200, 200))
+            frame_list.append(f[:, :, ::-1])
+
+    # Combine all frames and audio into a single video
+    if frame_list:
+        base64_video = convert(frame_list, wav, SAMPLE_RATE)
+        return base64_video
+    else:
+        raise ValueError("No frames were generated")
 
 
 def process_frames(
@@ -132,6 +177,27 @@ def process_frames(
         yield json.dumps({"video": base64_list})
 
 
+@app.post("/generate-video")
+async def generate_video_endpoint(face: str, audio: str):
+    """HTTP endpoint to generate and return the entire video."""
+    try:
+        # Decode and validate input data
+        face_image = decode_face_data(face)
+        audio_data = decode_audio_data(audio)
+
+        # Generate the video
+        base64_video = generate_video(face_image, audio_data)
+
+        # Return the base64-encoded video
+        return JSONResponse(content={"video": base64_video})
+    except ValueError as e:
+        logger.error(f"Input validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Processing error: {e}")
+        raise HTTPException(status_code=500, detail="An internal error occurred")
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -139,7 +205,6 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_json()
 
-            # Input validation
             if "face" not in data or "audio" not in data:
                 await websocket.send_json(
                     {"error": "Missing 'face' or 'audio' in input"}
@@ -160,7 +225,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"error": str(e)})
             except Exception as e:
                 logger.error(f"Processing error: {e}")
-                raise e
                 await websocket.send_json({"error": "An internal error occurred"})
 
     except WebSocketDisconnect:
