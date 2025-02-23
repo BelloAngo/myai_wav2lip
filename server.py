@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import logging
+import os
 from typing import Annotated, Generator, List
 
 import cv2
@@ -10,8 +11,8 @@ import numpy as np
 import torch
 from fastapi import (
     FastAPI,
-    HTTPException,
     Header,
+    HTTPException,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
