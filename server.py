@@ -2,13 +2,20 @@ import base64
 import io
 import json
 import logging
-from typing import Generator, List
+from typing import Annotated, Generator, List
 
 import cv2
 import librosa
 import numpy as np
 import torch
-from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Header,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from base64_video import convert
@@ -18,9 +25,11 @@ from runpod_wav2lip_util import *
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Globals
 app = FastAPI()
 
 # Constants
+API_KEY = os.environ["SERVER_API_KEY"]
 SAMPLE_RATE = 16000
 FPS = 25
 MEL_STEP_SIZE = 16
@@ -178,13 +187,25 @@ def process_frames(
 
 
 @app.post("/video")
-async def generate_video_endpoint(face: UploadFile, audio: UploadFile):
+async def generate_video_endpoint(
+    face: UploadFile,
+    audio: UploadFile,
+    api_key: Annotated[str, Header(alias="x-api-key")],
+):
     """HTTP endpoint to generate and return the entire video."""
+
+    # Check: valid API Key
+    if not api_key == API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+
+    # Check: Valid image
     if not face.content_type.startswith("image"):
         raise HTTPException(
             status_code=400,
             detail=f"Invalid 'face' type {face.content_type}, only images are allowed",
         )
+
+    # Check: valid audio
     if not audio.content_type.startswith("audio"):
         raise HTTPException(
             status_code=400,
@@ -212,13 +233,18 @@ async def generate_video_endpoint(face: UploadFile, audio: UploadFile):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Processing error: {e}")
-        raise e
         raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(api_key: str, websocket: WebSocket):
     await websocket.accept()
+
+    # Check: valid API Key
+    if not api_key == API_KEY:
+        await websocket.close(code=4001, reason="Invalid API Key")
+        return
+
     try:
         while True:
             data = await websocket.receive_json()
