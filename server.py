@@ -170,7 +170,7 @@ def process_frames(
                 audio_segment = wav[start_sample:end_sample]
 
                 base64_list = convert(frame_list, audio_segment, SAMPLE_RATE)
-                yield json.dumps({"video": base64_list})
+                yield json.dumps({"type": "stream", "data": {"video": base64_list}})
                 frame_list = []
 
     # Yield remaining frames
@@ -184,7 +184,9 @@ def process_frames(
         audio_segment = wav[start_sample:end_sample]
 
         base64_list = convert(frame_list, audio_segment, SAMPLE_RATE)
-        yield json.dumps({"video": base64_list})
+        yield json.dumps({"type": "stream", "data": {"video": base64_list}})
+
+    yield json.dumps({"type": "stream-end", "data": None})
 
 
 @app.post("/video")
@@ -228,7 +230,7 @@ async def generate_video_endpoint(
         base64_video = generate_video(face_image, audio_data)
 
         # Return the base64-encoded video
-        return JSONResponse(content={"video": base64_video})
+        return JSONResponse(content={"data": {"video": base64_video}})
     except ValueError as e:
         logger.error(f"Input validation error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -252,7 +254,10 @@ async def websocket_endpoint(api_key: str, websocket: WebSocket):
 
             if "face" not in data or "audio" not in data:
                 await websocket.send_json(
-                    {"error": "Missing 'face' or 'audio' in input"}
+                    {
+                        "type": "error",
+                        "data": {"msg": "Missing 'face' or 'audio' in input"},
+                    }
                 )
                 continue
 
@@ -263,14 +268,16 @@ async def websocket_endpoint(api_key: str, websocket: WebSocket):
                 full_frames = [face]
 
                 for result in process_frames(full_frames, mel_chunks, face, wav):
-                    await websocket.send_text(result)
+                    await websocket.send_json(result)
 
             except ValueError as e:
                 logger.error(f"Input validation error: {e}")
-                await websocket.send_json({"error": str(e)})
+                await websocket.send_json({"type": "error", "data": {"msg": str(e)}})
             except Exception as e:
                 logger.error(f"Processing error: {e}")
-                await websocket.send_json({"error": "An internal error occurred"})
+                await websocket.send_json(
+                    {"type": "error", "data": {"msg": "An internal error occurred"}}
+                )
 
     except WebSocketDisconnect:
         logger.info("Client disconnected")
