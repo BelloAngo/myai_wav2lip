@@ -10,6 +10,7 @@ import librosa
 import numpy as np
 import torch
 from fastapi import (
+    Body,
     FastAPI,
     Header,
     HTTPException,
@@ -191,8 +192,8 @@ def process_frames(
 
 @app.post("/video")
 async def generate_video_endpoint(
-    face: UploadFile,
-    audio: UploadFile,
+    face: Annotated[str, Body(embed=True, description="The image in base64")],
+    audio: Annotated[str, Body(embed=True, description="The audio in base64")],
     api_key: Annotated[str, Header(alias="x-api-key")],
 ):
     """HTTP endpoint to generate and return the entire video."""
@@ -202,32 +203,14 @@ async def generate_video_endpoint(
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
     # Check: Valid image
-    if not face.content_type.startswith("image"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid 'face' type {face.content_type}, only images are allowed",
-        )
+    face = decode_face_data(face_data=face)
 
     # Check: valid audio
-    if not audio.content_type.startswith("audio"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid 'audio' type {audio.content_type}, only audio files are allowed",
-        )
+    audio = decode_audio_data(audio_base64=audio)
 
     try:
-        # Read and encode face file as base64
-        face_base64 = base64.b64encode(await face.read()).decode("utf-8")
-
-        # Read and encode audio file as base64
-        audio_base64 = base64.b64encode(await audio.read()).decode("utf-8")
-
-        # Decode and validate input data
-        face_image = decode_face_data(face_base64)
-        audio_data = decode_audio_data(audio_base64)
-
         # Generate the video
-        base64_video = generate_video(face_image, audio_data)
+        base64_video = generate_video(face, audio)
 
         # Return the base64-encoded video
         return JSONResponse(content={"data": {"video": base64_video}})
