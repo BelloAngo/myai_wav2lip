@@ -134,7 +134,7 @@ def generate_video(face: np.ndarray, wav: np.ndarray) -> str:
             y1, y2, x1, x2 = c
             p = cv2.resize(p.astype(np.uint8), (x2 - x1, y2 - y1))
             f[y1:y2, x1:x2] = p
-            f = cv2.resize(f, (200, 200))
+            f = cv2.resize(f, (800, 800))
             frame_list.append(f[:, :, ::-1])
 
     # Combine all frames and audio into a single video
@@ -166,7 +166,7 @@ def process_frames(
             y1, y2, x1, x2 = c
             p = cv2.resize(p.astype(np.uint8), (x2 - x1, y2 - y1))
             f[y1:y2, x1:x2] = p
-            f = cv2.resize(f, (200, 200))
+            f = cv2.resize(f, (800, 800))
             frame_list.append(f[:, :, ::-1])
 
             if len(frame_list) == 25:  # Yield a batch of 25 frames
@@ -210,7 +210,7 @@ async def generate_video_endpoint(
     if not api_key == API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
-    # Check: Valid image
+    # Check: Valid image/video
     face = decode_face_data(face_data=face)
 
     # Check: valid audio
